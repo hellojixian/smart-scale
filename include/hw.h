@@ -5,6 +5,7 @@
 #define SDA_PIN PB11
 #define SCL_PIN PB10
 
+// OLED 128x32
 #define OLED_I2C_ADDRESS 0x3C
 
 #define HX711_SCK_PIN PB4
