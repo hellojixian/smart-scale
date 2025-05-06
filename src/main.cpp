@@ -7,18 +7,21 @@
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
 // Variables to keep track of button states
-volatile bool btnOkPressed = false;
-volatile bool btnNextPressed = false;
-volatile bool btnPrevPressed = false;
-volatile bool btnCancelPressed = false;
-volatile unsigned long lastDebounceTime = 0;
-const unsigned long debounceDelay = 200; // Debounce time in milliseconds
+bool btnOkPressed = false;
+bool btnNextPressed = false;
+bool btnPrevPressed = false;
+bool btnCancelPressed = false;
+unsigned long lastDebounceTime = 0;
+const unsigned long debounceDelay = 50; // Debounce time in milliseconds
+
+// Previous button states for polling
+bool btnOkLastState = HIGH;
+bool btnNextLastState = HIGH;
+bool btnPrevLastState = HIGH;
+bool btnCancelLastState = HIGH;
 
 // Function prototypes
-void btnOkISR();
-void btnNextISR();
-void btnPrevISR();
-void btnCancelISR();
+void checkButtonStates();
 void playBuzzerTone();
 void playStartupSound();
 void displayButtonName(const char *buttonName);
@@ -53,36 +56,36 @@ void setup()
   display.setTextSize(2);
   display.setCursor(10, 16);
   display.println(F("LoadScale"));
-
-  // draw a horizontal line at 32 pixels from the top
-  // display.drawFastHLine(0, 0, SCREEN_WIDTH, SSD1306_WHITE);
-  // display.drawFastHLine(0, 31, SCREEN_WIDTH, SSD1306_WHITE);
   display.display();
 
   // Setup buzzer pin as output
   pinMode(BUZZER_PIN, OUTPUT);
   digitalWrite(BUZZER_PIN, LOW); // Ensure buzzer is off at start
 
-  // Setup button pins and attach interrupts
+  // Setup button pins as inputs with pullups
   pinMode(BTN_OK_PIN, INPUT_PULLUP);
   pinMode(BTN_NEXT_PIN, INPUT_PULLUP);
   pinMode(BTN_PREV_PIN, INPUT_PULLUP);
   pinMode(BTN_CANCEL_PIN, INPUT_PULLUP);
 
-  attachInterrupt(digitalPinToInterrupt(BTN_OK_PIN), btnOkISR, FALLING);
-  attachInterrupt(digitalPinToInterrupt(BTN_NEXT_PIN), btnNextISR, FALLING);
-  attachInterrupt(digitalPinToInterrupt(BTN_PREV_PIN), btnPrevISR, FALLING);
-  attachInterrupt(digitalPinToInterrupt(BTN_CANCEL_PIN), btnCancelISR, FALLING);
+  // Initialize the last button states
+  btnOkLastState = digitalRead(BTN_OK_PIN);
+  btnNextLastState = digitalRead(BTN_NEXT_PIN);
+  btnPrevLastState = digitalRead(BTN_PREV_PIN);
+  btnCancelLastState = digitalRead(BTN_CANCEL_PIN);
 
   // Play startup sound
   playStartupSound();
 
-  Serial.println("System ready. Waiting for button presses...");
+  Serial.println("System ready. Waiting for button presses (polling method)...");
 }
 
 void loop()
 {
-  // Check for button presses and update display
+  // Check button states (polling approach)
+  checkButtonStates();
+
+  // Handle button presses
   if (btnOkPressed)
   {
     displayButtonName("OK");
@@ -111,45 +114,69 @@ void loop()
     btnCancelPressed = false;
   }
 
-  // Small delay to prevent CPU from working too hard
-  delay(10);
+  // Small delay to prevent CPU from working too hard but still be responsive
+  delay(2);
 }
 
-// Button interrupt handlers
-void btnOkISR()
+// Enhanced button polling function with optimized debouncing
+void checkButtonStates()
 {
-  // Simple debounce check
-  if ((millis() - lastDebounceTime) > debounceDelay)
+  // Read current button states (LOW when pressed since connected to GND)
+  bool okCurrState = digitalRead(BTN_OK_PIN);
+  bool nextCurrState = digitalRead(BTN_NEXT_PIN);
+  bool prevCurrState = digitalRead(BTN_PREV_PIN);
+  bool cancelCurrState = digitalRead(BTN_CANCEL_PIN);
+
+  // Get current time once for all checks
+  unsigned long currentMillis = millis();
+  bool timeCheck = (currentMillis - lastDebounceTime) > debounceDelay;
+
+  // OK button - check for HIGH to LOW transition (button press)
+  if (okCurrState != btnOkLastState)
   {
-    btnOkPressed = true;
-    lastDebounceTime = millis();
+    if (timeCheck && okCurrState == LOW)
+    {
+      btnOkPressed = true;
+      Serial.println("OK button pressed (polling)");
+      lastDebounceTime = currentMillis;
+    }
+    btnOkLastState = okCurrState;
   }
-}
 
-void btnNextISR()
-{
-  if ((millis() - lastDebounceTime) > debounceDelay)
+  // NEXT button
+  if (nextCurrState != btnNextLastState)
   {
-    btnNextPressed = true;
-    lastDebounceTime = millis();
+    if (timeCheck && nextCurrState == LOW)
+    {
+      btnNextPressed = true;
+      Serial.println("NEXT button pressed (polling)");
+      lastDebounceTime = currentMillis;
+    }
+    btnNextLastState = nextCurrState;
   }
-}
 
-void btnPrevISR()
-{
-  if ((millis() - lastDebounceTime) > debounceDelay)
+  // PREV button
+  if (prevCurrState != btnPrevLastState)
   {
-    btnPrevPressed = true;
-    lastDebounceTime = millis();
+    if (timeCheck && prevCurrState == LOW)
+    {
+      btnPrevPressed = true;
+      Serial.println("PREV button pressed (polling)");
+      lastDebounceTime = currentMillis;
+    }
+    btnPrevLastState = prevCurrState;
   }
-}
 
-void btnCancelISR()
-{
-  if ((millis() - lastDebounceTime) > debounceDelay)
+  // CANCEL button
+  if (cancelCurrState != btnCancelLastState)
   {
-    btnCancelPressed = true;
-    lastDebounceTime = millis();
+    if (timeCheck && cancelCurrState == LOW)
+    {
+      btnCancelPressed = true;
+      Serial.println("CANCEL button pressed (polling)");
+      lastDebounceTime = currentMillis;
+    }
+    btnCancelLastState = cancelCurrState;
   }
 }
 
