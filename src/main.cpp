@@ -14,6 +14,11 @@ bool btnCancelPressed = false;
 unsigned long lastDebounceTime = 0;
 const unsigned long debounceDelay = 50; // Debounce time in milliseconds
 
+// Battery measurement variables
+float batteryVoltage = 0.0;
+unsigned long lastBatteryCheckTime = 0;
+const unsigned long batteryCheckInterval = 2000; // Check battery every 2 seconds
+
 // Previous button states for polling
 bool btnOkLastState = HIGH;
 bool btnNextLastState = HIGH;
@@ -25,6 +30,8 @@ void checkButtonStates();
 void playBuzzerTone();
 void playStartupSound();
 void displayButtonName(const char *buttonName);
+float readBatteryVoltage();
+void displayBatteryLevel();
 
 void setup()
 {
@@ -68,6 +75,11 @@ void setup()
   pinMode(BTN_PREV_PIN, INPUT_PULLUP);
   pinMode(BTN_CANCEL_PIN, INPUT_PULLUP);
 
+  // Setup battery measurement pins
+  pinMode(VMETER_CTL_PIN, OUTPUT);
+  pinMode(VMETER_SIG_PIN, INPUT_ANALOG);
+  digitalWrite(VMETER_CTL_PIN, LOW); // Initially disable the MOSFET
+
   // Initialize the last button states
   btnOkLastState = digitalRead(BTN_OK_PIN);
   btnNextLastState = digitalRead(BTN_NEXT_PIN);
@@ -84,6 +96,16 @@ void loop()
 {
   // Check button states (polling approach)
   checkButtonStates();
+
+  // Check if it's time to measure battery voltage
+  unsigned long currentMillis = millis();
+  if (currentMillis - lastBatteryCheckTime >= batteryCheckInterval)
+  {
+    // Measure battery voltage
+    batteryVoltage = readBatteryVoltage();
+    displayBatteryLevel();
+    lastBatteryCheckTime = currentMillis;
+  }
 
   // Handle button presses
   if (btnOkPressed)
@@ -250,5 +272,88 @@ void displayButtonName(const char *buttonName)
   display.setCursor(0, 0);
   display.println(F("Button:"));
   display.println(buttonName);
+  display.display();
+}
+
+// Read battery voltage using voltage divider (10K/47K)
+float readBatteryVoltage()
+{
+  // Enable the MOSFET to allow voltage reading
+  digitalWrite(VMETER_CTL_PIN, HIGH);
+
+  // Small delay to ensure the circuit stabilizes
+  delay(100);
+
+  // Read the analog value with oversampling for better accuracy
+  long adcSum = 0;
+  const int samplesCount = 10;
+  for (int i = 0; i < samplesCount; i++)
+  {
+    adcSum += analogRead(VMETER_SIG_PIN);
+    delay(10);
+  }
+  int adcValue = adcSum / samplesCount;
+
+  // Disable the MOSFET to save power
+  digitalWrite(VMETER_CTL_PIN, LOW);
+
+  // Calculate the actual battery voltage
+  // For a 12-bit ADC (0-4095), with 3.3V reference
+  // Using calibration based on actual measurements:
+  float voltage = (adcValue / 4095.0) * 3.3 * 5.05; // 5.5 is the voltage divider ratio (47K + 10K) / 10K
+
+  Serial.print("Battery ADC Value: ");
+  Serial.print(adcValue);
+  Serial.print(", Raw: ");
+  Serial.print(voltage);
+  Serial.print("V");
+  Serial.println("V");
+
+  return voltage;
+}
+
+// Display battery level on OLED
+void displayBatteryLevel()
+{
+  display.clearDisplay();
+
+  // Display battery voltage
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.println(F("Battery Status:"));
+
+  display.setTextSize(2);
+  display.setCursor(0, 10);
+  display.print(batteryVoltage, 2);
+  display.println(F("V"));
+
+  // Draw battery icon
+  int batteryWidth = 40;
+  int batteryHeight = 20;
+  int batteryX = SCREEN_WIDTH - batteryWidth - 5;
+  int batteryY = 6;
+
+  // Adjust battery level calculation to use calibrated voltage ranges
+  // For a LiPo battery: ~3.0V is empty, ~4.2V is full
+  int batteryLevel = map(min(max(int(batteryVoltage * 100), 300), 420), 300, 420, 0, 100);
+  int fillWidth = map(batteryLevel, 0, 100, 0, batteryWidth - 4);
+
+  // Draw battery outline
+  display.drawRect(batteryX, batteryY, batteryWidth, batteryHeight, SSD1306_WHITE);
+  display.drawRect(batteryX + batteryWidth, batteryY + batteryHeight / 4, 4, batteryHeight / 2, SSD1306_WHITE);
+
+  // Fill battery based on level
+  if (batteryLevel > 0)
+  {
+    display.fillRect(batteryX + 2, batteryY + 2, fillWidth, batteryHeight - 4, SSD1306_WHITE);
+  }
+
+  // Display percentage
+  display.setTextSize(1);
+  display.setCursor(batteryX, batteryY + batteryHeight + 2);
+  display.print(batteryLevel);
+  display.println(F("%"));
+
   display.display();
 }
