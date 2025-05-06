@@ -6,6 +6,9 @@
 #define SCL_PIN PB10
 
 // OLED 128x32
+// OLED display instance
+#define SCREEN_WIDTH 128 // OLED display width, in pixels
+#define SCREEN_HEIGHT 32 // OLED display height, in pixels
 #define OLED_I2C_ADDRESS 0x3C
 
 #define HX711_SCK_PIN PB4
