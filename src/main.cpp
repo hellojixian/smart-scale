@@ -3,6 +3,7 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include "hw.h"
+#include <stm32f1xx_hal.h>
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
@@ -11,7 +12,7 @@ bool btnOkPressed = false;
 bool btnNextPressed = false;
 bool btnPrevPressed = false;
 bool btnCancelPressed = false;
-unsigned long lastDebounceTime = 0;
+volatile unsigned long lastDebounceTime = 0;
 const unsigned long debounceDelay = 50; // Debounce time in milliseconds
 
 // Battery measurement variables
@@ -19,25 +20,35 @@ float batteryVoltage = 0.0;
 unsigned long lastBatteryCheckTime = 0;
 const unsigned long batteryCheckInterval = 2000; // Check battery every 2 seconds
 
-// Previous button states for polling
-bool btnOkLastState = HIGH;
-bool btnNextLastState = HIGH;
-bool btnPrevLastState = HIGH;
-bool btnCancelLastState = HIGH;
+// Volatile flags for interrupt handlers
+volatile bool btnOkFlag = false;
+volatile bool btnNextFlag = false;
+volatile bool btnPrevFlag = false;
+volatile bool btnCancelFlag = false;
 
 // Function prototypes
-void checkButtonStates();
 void playBuzzerTone();
 void playStartupSound();
 void displayButtonName(const char *buttonName);
 float readBatteryVoltage();
 void displayBatteryLevel();
 
+// Interrupt handlers for buttons
+void btnOkISR();
+void btnNextISR();
+void btnPrevISR();
+void btnCancelISR();
+void processButtonFlags();
+
 void setup()
 {
   // Initialize serial communication
   Serial.begin(115200);
   Serial.println("Smart Scale Starting...");
+
+  // Set up built-in LED for debugging
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, LOW);
 
   // Initialize I2C
   Wire.setSDA(SDA_PIN);
@@ -75,27 +86,33 @@ void setup()
   pinMode(BTN_PREV_PIN, INPUT_PULLUP);
   pinMode(BTN_CANCEL_PIN, INPUT_PULLUP);
 
+  // Setup button interrupts
+  attachInterrupt(digitalPinToInterrupt(BTN_OK_PIN), btnOkISR, FALLING);
+  attachInterrupt(digitalPinToInterrupt(BTN_NEXT_PIN), btnNextISR, FALLING);
+  attachInterrupt(digitalPinToInterrupt(BTN_PREV_PIN), btnPrevISR, FALLING);
+  attachInterrupt(digitalPinToInterrupt(BTN_CANCEL_PIN), btnCancelISR, FALLING);
+
   // Setup battery measurement pins
   pinMode(VMETER_CTL_PIN, OUTPUT);
   pinMode(VMETER_SIG_PIN, INPUT_ANALOG);
   digitalWrite(VMETER_CTL_PIN, LOW); // Initially disable the MOSFET
 
-  // Initialize the last button states
-  btnOkLastState = digitalRead(BTN_OK_PIN);
-  btnNextLastState = digitalRead(BTN_NEXT_PIN);
-  btnPrevLastState = digitalRead(BTN_PREV_PIN);
-  btnCancelLastState = digitalRead(BTN_CANCEL_PIN);
-
   // Play startup sound
   playStartupSound();
 
-  Serial.println("System ready. Waiting for button presses (polling method)...");
+  // 设置中断优先级
+  HAL_NVIC_SetPriority(EXTI0_IRQn, 0, 0); // 预占优先级0，子优先级0
+  HAL_NVIC_SetPriority(EXTI1_IRQn, 0, 0);
+  HAL_NVIC_SetPriority(EXTI2_IRQn, 0, 0);
+  HAL_NVIC_SetPriority(EXTI3_IRQn, 0, 0);
+
+  Serial.println("System ready. Waiting for button presses (EXTI method)...");
 }
 
 void loop()
 {
-  // Check button states (polling approach)
-  checkButtonStates();
+  // Process any button flags set by interrupts
+  processButtonFlags();
 
   // Check if it's time to measure battery voltage
   unsigned long currentMillis = millis();
@@ -140,65 +157,84 @@ void loop()
   delay(2);
 }
 
-// Enhanced button polling function with optimized debouncing
-void checkButtonStates()
+// Interrupt Service Routines for buttons
+void btnOkISR()
 {
-  // Read current button states (LOW when pressed since connected to GND)
-  bool okCurrState = digitalRead(BTN_OK_PIN);
-  bool nextCurrState = digitalRead(BTN_NEXT_PIN);
-  bool prevCurrState = digitalRead(BTN_PREV_PIN);
-  bool cancelCurrState = digitalRead(BTN_CANCEL_PIN);
-
-  // Get current time once for all checks
   unsigned long currentMillis = millis();
-  bool timeCheck = (currentMillis - lastDebounceTime) > debounceDelay;
-
-  // OK button - check for HIGH to LOW transition (button press)
-  if (okCurrState != btnOkLastState)
+  if ((currentMillis - lastDebounceTime) > debounceDelay)
   {
-    if (timeCheck && okCurrState == LOW)
-    {
-      btnOkPressed = true;
-      Serial.println("OK button pressed (polling)");
-      lastDebounceTime = currentMillis;
-    }
-    btnOkLastState = okCurrState;
+    digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN)); // Toggle LED for visual feedback
+    btnOkFlag = true;
+    lastDebounceTime = currentMillis;
+  }
+}
+
+void btnNextISR()
+{
+  unsigned long currentMillis = millis();
+  if ((currentMillis - lastDebounceTime) > debounceDelay)
+  {
+    digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN)); // Toggle LED for visual feedback
+    btnNextFlag = true;
+    lastDebounceTime = currentMillis;
+  }
+}
+
+void btnPrevISR()
+{
+  unsigned long currentMillis = millis();
+  if ((currentMillis - lastDebounceTime) > debounceDelay)
+  {
+    digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN)); // Toggle LED for visual feedback
+    btnPrevFlag = true;
+    lastDebounceTime = currentMillis;
+  }
+}
+
+void btnCancelISR()
+{
+  unsigned long currentMillis = millis();
+  if ((currentMillis - lastDebounceTime) > debounceDelay)
+  {
+    digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN)); // Toggle LED for visual feedback
+    btnCancelFlag = true;
+    lastDebounceTime = currentMillis;
+  }
+}
+
+// Process button flags (set by interrupts) in the main loop
+void processButtonFlags()
+{
+  // Process the OK button flag
+  if (btnOkFlag)
+  {
+    btnOkPressed = true;
+    btnOkFlag = false;
+    Serial.println("OK button pressed (EXTI)");
   }
 
-  // NEXT button
-  if (nextCurrState != btnNextLastState)
+  // Process the NEXT button flag
+  if (btnNextFlag)
   {
-    if (timeCheck && nextCurrState == LOW)
-    {
-      btnNextPressed = true;
-      Serial.println("NEXT button pressed (polling)");
-      lastDebounceTime = currentMillis;
-    }
-    btnNextLastState = nextCurrState;
+    btnNextPressed = true;
+    btnNextFlag = false;
+    Serial.println("NEXT button pressed (EXTI)");
   }
 
-  // PREV button
-  if (prevCurrState != btnPrevLastState)
+  // Process the PREV button flag
+  if (btnPrevFlag)
   {
-    if (timeCheck && prevCurrState == LOW)
-    {
-      btnPrevPressed = true;
-      Serial.println("PREV button pressed (polling)");
-      lastDebounceTime = currentMillis;
-    }
-    btnPrevLastState = prevCurrState;
+    btnPrevPressed = true;
+    btnPrevFlag = false;
+    Serial.println("PREV button pressed (EXTI)");
   }
 
-  // CANCEL button
-  if (cancelCurrState != btnCancelLastState)
+  // Process the CANCEL button flag
+  if (btnCancelFlag)
   {
-    if (timeCheck && cancelCurrState == LOW)
-    {
-      btnCancelPressed = true;
-      Serial.println("CANCEL button pressed (polling)");
-      lastDebounceTime = currentMillis;
-    }
-    btnCancelLastState = cancelCurrState;
+    btnCancelPressed = true;
+    btnCancelFlag = false;
+    Serial.println("CANCEL button pressed (EXTI)");
   }
 }
 
